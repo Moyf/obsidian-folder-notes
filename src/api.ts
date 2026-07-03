@@ -39,6 +39,8 @@ export interface FolderNotesApi {
 	 * Converts an existing note into the folder note for its parent folder.
 	 * Throws FolderNotesApiPathError if the path does not point to a note
 	 * inside a non-root folder.
+	 * Throws FolderNotesApiAlreadyFolderNoteError if the note is already
+	 * a folder note (e.g. aa/aa.md).
 	 */
 	convertNoteToFolderNote(notePath: string, options?: ConvertNoteToFolderNoteOptions): Promise<void>;
 }
@@ -50,6 +52,13 @@ export class FolderNotesApiPathError extends Error {
 	) {
 		super(message);
 		this.name = 'FolderNotesApiPathError';
+	}
+}
+
+export class FolderNotesApiAlreadyFolderNoteError extends Error {
+	constructor(readonly notePath: string) {
+		super(`Note is already a folder note: ${notePath}`);
+		this.name = 'FolderNotesApiAlreadyFolderNoteError';
 	}
 }
 
@@ -83,6 +92,11 @@ async function convertNoteToFolderNote(
 	const parentFolder = file.parent;
 	if (!(parentFolder instanceof TFolder) || parentFolder.path === '' || parentFolder.path === '/') {
 		throw new FolderNotesApiPathError(`Note must be inside a non-root folder: ${notePath}`, notePath);
+	}
+
+	// Guard: already a folder note (e.g. aa/aa.md)
+	if (getFolderNote(plugin, parentFolder.path) === file) {
+		throw new FolderNotesApiAlreadyFolderNoteError(notePath);
 	}
 
 	// Build the new folder path: sibling folder named after the note's basename
