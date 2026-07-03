@@ -1,6 +1,6 @@
 import { TFile, TFolder } from 'obsidian';
 import type FolderNotesPlugin from './main';
-import { getFolderNote, turnIntoFolderNote } from './functions/folderNoteFunctions';
+import { getFolderNote, createFolderNote } from './functions/folderNoteFunctions';
 import { getDetachedFolder, getExcludedFolder } from './ExcludeFolders/functions/folderFunctions';
 
 const API_VERSION = '1.0.0';
@@ -80,19 +80,35 @@ async function convertNoteToFolderNote(
 		throw new FolderNotesApiPathError(`No note exists at path: ${notePath}`, notePath);
 	}
 
-	const folder = file.parent;
-	if (!(folder instanceof TFolder) || folder.path === '' || folder.path === '/') {
-		throw new FolderNotesApiPathError(`Note must be inside a folder: ${notePath}`, notePath);
+	const parentFolder = file.parent;
+	if (!(parentFolder instanceof TFolder) || parentFolder.path === '' || parentFolder.path === '/') {
+		throw new FolderNotesApiPathError(`Note must be inside a non-root folder: ${notePath}`, notePath);
 	}
 
-	const folderNote = getFolderNote(plugin, folder.path);
-	if (folderNote === file) return;
+	// Build the new folder path: sibling folder named after the note's basename
+	const newFolderPath = parentFolder.path === ''
+		? file.basename
+		: `${parentFolder.path}/${file.basename}`;
 
-	await turnIntoFolderNote(
-		plugin,
-		file,
-		folder,
-		folderNote,
-		options.skipConfirmation ?? true,
-	);
+	if (plugin.app.vault.getAbstractFileByPath(newFolderPath)) {
+		throw new FolderNotesApiPathError(`A folder already exists at: ${newFolderPath}`, notePath);
+	}
+
+	// Temporarily disable autoCreate to avoid the plugin auto-creating a folder note on folder creation
+	const previousAutoCreate = plugin.settings.autoCreate;
+	plugin.settings.autoCreate = false;
+	void plugin.saveSettings();
+
+	await plugin.app.vault.createFolder(newFolderPath);
+	const newFolder = plugin.app.vault.getAbstractFileByPath(newFolderPath);
+	if (!(newFolder instanceof TFolder)) {
+		plugin.settings.autoCreate = previousAutoCreate;
+		void plugin.saveSettings();
+		throw new FolderNotesApiPathError(`Failed to create folder at: ${newFolderPath}`, notePath);
+	}
+
+	await createFolderNote(plugin, newFolder.path, false, '.' + file.extension, false, file);
+
+	plugin.settings.autoCreate = previousAutoCreate;
+	void plugin.saveSettings();
 }
